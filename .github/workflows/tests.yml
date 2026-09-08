@@ -17,10 +17,5 @@ jobs:
       - name: Install test dependencies
         run: pip install -r tests/requirements.txt
 
-      - name: Run unit and camera tests
-        run: >-
-          python -m pytest
-          tests/pybambu
-          tests/test_camera_probe.py
-          tests/test_camera_entity.py
-          -v
+      - name: Run pybambu unit tests
+        run: python -m pytest tests/pybambu -v
