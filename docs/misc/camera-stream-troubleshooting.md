@@ -34,17 +34,21 @@ verification is configured. `--ffmpeg /path/to/ffmpeg` selects another build;
 15-second no-decoded-frame watchdog. These are diagnostic limits, not suggested
 Home Assistant stream settings.
 
+The default uses ordinary verbose logging and does not impose a short socket
+timeout. Add `--protocol-trace` only when RTSP negotiation counters are needed;
+trace logging is substantially noisier and should not be the initial playback
+test.
+
 ## Interpreting the JSON result
 
 - `success` requires decoded frames for the requested media duration, exit code
   zero, and no watchdog stop. An authenticated `PLAY` response alone is not
   successful playback.
-- `interleaved_packets` and `interleaved_bytes` count FFmpeg's RTSP-over-TCP
-  packet trace entries (RTP/RTCP, not decoded video). These diagnostic trace
-  fields are version-dependent; absence alone does not prove no network traffic.
-- `methods` and `statuses` summarize RTSP negotiation without exposing URLs,
-  authentication headers, or session identifiers. A `401` challenge followed
-  by a successful authenticated response is normal.
+- With `--protocol-trace`, `interleaved_packets` and `interleaved_bytes` count
+  FFmpeg's RTSP-over-TCP packet trace entries (RTP/RTCP, not decoded video), and
+  `methods` and `statuses` summarize negotiation. These fields are
+  version-dependent and remain empty with the default verbose logging. Their
+  absence alone does not prove there was no network traffic.
 - `TEARDOWN` in `methods` means FFmpeg logged a teardown request. It does not
   prove the printer processed that request or released all server resources.
 - `stop_reason` indicates a decoded-frame stall or wall-clock deadline.
@@ -64,9 +68,12 @@ PyAV runtime before promoting an FFmpeg experiment to integration code.
 
 Keep `use_stream_for_stills=True` unless measurements justify a change: HA can
 reuse its existing provider for snapshots; `True` does not inherently open a
-second RTSP session. Inspect actual consumers and connections. Likewise, a
-working TCP control handshake followed by no video does not justify a UDP
-firewall change: FFmpeg uses TCP interleaving for RTSPS.
+second RTSP session. For the X2D, isolated FFplay and PyAV playback succeeded
+while repeated HA thumbnail requests failed after the first image. The X2D
+therefore uses a placeholder thumbnail so automatic still requests do not claim
+the LAN camera before live view. Other RTSP models retain stream-based stills.
+Likewise, a working TCP control handshake followed by no video does not justify
+a UDP firewall change: compare default RTSPS and explicit TCP playback first.
 
 If a source stalls with multiple clients, isolate it before concluding that
 the printer needs a restart. Any recovery that changes production HA or printer

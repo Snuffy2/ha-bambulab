@@ -1,10 +1,10 @@
 """Offline tests of the manual camera probe's reporting and process cleanup."""
 
-from dataclasses import asdict
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from dataclasses import asdict
+from pathlib import Path
 
 import pytest
 
@@ -41,29 +41,68 @@ def test_report_only_exposes_allowlisted_diagnostics() -> None:
     assert result.media_seconds == 1
 
 
+def test_default_command_matches_sustained_playback_baseline() -> None:
+    command = probe.build_ffmpeg_command(
+        "ffmpeg",
+        "rtsps://example.invalid/live",
+        60,
+        insecure=True,
+        protocol_trace=False,
+    )
+    assert command[command.index("-loglevel") + 1] == "verbose"
+    assert command[command.index("-rtsp_transport") + 1] == "tcp"
+    assert command[command.index("-tls_verify") + 1] == "0"
+    assert "-timeout" not in command
+
+
+def test_protocol_trace_is_explicit() -> None:
+    command = probe.build_ffmpeg_command(
+        "ffmpeg",
+        "rtsps://example.invalid/live",
+        60,
+        insecure=False,
+        protocol_trace=True,
+    )
+    assert command[command.index("-loglevel") + 1] == "trace"
+    assert command[command.index("-tls_verify") + 1] == "1"
+
+
 @pytest.mark.parametrize(
     ("frames", "media_seconds", "exit_code", "stop_reason", "success"),
-    [(0, 60, 0, None, False), (10, 1, 0, None, False),
-     (100, 60, 1, None, False), (100, 60, 0, "wall_clock_limit", False),
-     (100, 60, 0, None, True)],
+    [
+        (0, 60, 0, None, False),
+        (10, 1, 0, None, False),
+        (100, 60, 1, None, False),
+        (100, 60, 0, "wall_clock_limit", False),
+        (100, 60, 0, None, True),
+    ],
 )
 def test_success_requires_full_decoded_stream(
-    frames: int, media_seconds: float, exit_code: int,
-    stop_reason: str | None, success: bool,
+    frames: int,
+    media_seconds: float,
+    exit_code: int,
+    stop_reason: str | None,
+    success: bool,
 ) -> None:
     result = probe.ProbeResult(
-        frames=frames, media_seconds=media_seconds,
-        exit_code=exit_code, stop_reason=stop_reason,
+        frames=frames,
+        media_seconds=media_seconds,
+        exit_code=exit_code,
+        stop_reason=stop_reason,
     )
     assert result.succeeded(60) is success
 
 
 def test_drains_large_stderr_without_losing_progress() -> None:
-    command = [sys.executable, "-c", """
+    command = [
+        sys.executable,
+        "-c",
+        """
 import sys
 sys.stderr.write('private-log-line\\n' * 20000)
 print('frame=60\\nout_time_us=2000000', flush=True)
-"""]
+""",
+    ]
     result = probe.run_probe(command, duration=2, stall_timeout=5)
     assert result.succeeded(2)
     assert not result.forced_kill
@@ -71,7 +110,10 @@ print('frame=60\\nout_time_us=2000000', flush=True)
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal semantics")
 def test_stalled_child_can_teardown_during_graceful_shutdown() -> None:
-    command = [sys.executable, "-c", """
+    command = [
+        sys.executable,
+        "-c",
+        """
 import signal, sys, time
 def stop(signum, frame):
     print('TEARDOWN rtsps://private.invalid/live RTSP/1.0', file=sys.stderr, flush=True)
@@ -80,7 +122,8 @@ signal.signal(signal.SIGINT, stop)
 print('frame=1', flush=True)
 while True:
     time.sleep(0.05)
-"""]
+""",
+    ]
     result = probe.run_probe(command, duration=10, stall_timeout=0.5, stop_timeout=2)
     assert result.stop_reason == "no_decoded_frame_progress"
     assert "TEARDOWN" in result.methods
@@ -90,13 +133,17 @@ while True:
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal semantics")
 def test_unresponsive_child_is_reaped_and_never_reported_successful() -> None:
-    command = [sys.executable, "-c", """
+    command = [
+        sys.executable,
+        "-c",
+        """
 import signal, time
 signal.signal(signal.SIGINT, signal.SIG_IGN)
 print('frame=1', flush=True)
 while True:
     time.sleep(0.05)
-"""]
+""",
+    ]
     result = probe.run_probe(command, duration=10, stall_timeout=0.5, stop_timeout=0.5)
     assert result.forced_kill
     assert result.exit_code is not None

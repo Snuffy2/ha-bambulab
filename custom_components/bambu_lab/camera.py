@@ -1,20 +1,17 @@
-import os
-
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.core import HomeAssistant
 from io import BytesIO
+
+from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from PIL import Image, ImageDraw
 
 from .const import DOMAIN, LOGGER, Options
-from .models import BambuLabEntity
-from .pybambu.const import Features
-from .pybambu.utils import get_authenticated_rtsp_url
-from .definitions import BambuLabSensorEntityDescription
-
-from homeassistant.components.camera import Camera, CameraEntityFeature
-
 from .coordinator import BambuDataUpdateCoordinator
+from .definitions import BambuLabSensorEntityDescription
+from .models import BambuLabEntity
+from .pybambu.const import Features, Printers
+from .pybambu.utils import get_authenticated_rtsp_url
 
 CHAMBER_CAMERA_SENSOR = BambuLabSensorEntityDescription(
         key="p1p_camera",
@@ -33,7 +30,7 @@ async def async_setup_entry(
 
     coordinator: BambuDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    LOGGER.debug(f"CAMERA::async_setup_entry")
+    LOGGER.debug("CAMERA::async_setup_entry")
 
     # NOTE: We intentionally do NOT gate on has_full_printer_data here.
     #
@@ -110,7 +107,8 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
 
     @property
     def use_stream_for_stills(self) -> bool:
-        return True
+        """Return whether Home Assistant should open the stream for thumbnails."""
+        return self.coordinator.get_model().info.device_type != Printers.X2D
 
     async def stream_source(self) -> str | None:
         return self._stream_source()
@@ -132,7 +130,7 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
         )
 
     def camera_image(self, width=None, height=None):
-        """Return a still image placeholder if RTSP fails."""
+        """Return a placeholder when direct still retrieval is selected."""
         img_width = width or 320
         img_height = height or 240
 

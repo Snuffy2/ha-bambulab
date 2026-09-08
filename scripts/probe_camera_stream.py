@@ -5,7 +5,6 @@ retries automatically or changes printer/Home Assistant configuration.
 """
 
 import argparse
-from dataclasses import asdict, dataclass, field
 import getpass
 import ipaddress
 import json
@@ -16,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import asdict, dataclass, field
 from typing import TextIO
 from urllib.parse import quote
 
@@ -77,8 +77,13 @@ def run_probe(
     result = ProbeResult()
     lock = threading.Lock()
     process = subprocess.Popen(
-        command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, errors="replace", bufsize=1,
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        errors="replace",
+        bufsize=1,
     )
     start = last_frame = time.monotonic()
     stopping: float | None = None
@@ -131,14 +136,62 @@ def run_probe(
     return result
 
 
+def build_ffmpeg_command(
+    binary: str,
+    url: str,
+    duration: int,
+    *,
+    insecure: bool,
+    protocol_trace: bool,
+) -> list[str]:
+    """Build the bounded FFmpeg command used by the diagnostic."""
+    return [
+        binary,
+        "-hide_banner",
+        "-loglevel",
+        "trace" if protocol_trace else "verbose",
+        "-nostats",
+        "-nostdin",
+        "-tls_verify",
+        "0" if insecure else "1",
+        "-rtsp_transport",
+        "tcp",
+        "-i",
+        url,
+        "-map",
+        "0:v:0",
+        "-an",
+        "-t",
+        str(duration),
+        "-progress",
+        "pipe:1",
+        "-f",
+        "null",
+        "-",
+    ]
+
+
 def main() -> int:
     """Prompt privately for credentials and print a JSON diagnostic summary."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("host", help="Printer IP address (no URL or credentials)")
     parser.add_argument("--ffmpeg", default="ffmpeg", help="FFmpeg binary to test")
-    parser.add_argument("--duration", type=int, default=60, choices=range(1, 301), metavar="1..300")
-    parser.add_argument("--stall-timeout", type=int, default=15, choices=range(5, 61), metavar="5..60")
-    parser.add_argument("--insecure", action="store_true", help="Explicitly allow the printer's self-signed TLS certificate")
+    parser.add_argument(
+        "--duration", type=int, default=60, choices=range(1, 301), metavar="1..300"
+    )
+    parser.add_argument(
+        "--stall-timeout", type=int, default=15, choices=range(5, 61), metavar="5..60"
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="Explicitly allow the printer's self-signed TLS certificate",
+    )
+    parser.add_argument(
+        "--protocol-trace",
+        action="store_true",
+        help="Collect RTSP negotiation counters using high-volume trace logging",
+    )
     args = parser.parse_args()
     try:
         host = str(ipaddress.ip_address(args.host))
@@ -155,12 +208,13 @@ def main() -> int:
     if ":" in host:
         host = f"[{host}]"
     url = f"rtsps://bblp:{quote(access_code, safe='')}@{host}:322/streaming/live/1"
-    command = [
-        binary, "-hide_banner", "-loglevel", "trace", "-nostats", "-nostdin",
-        "-tls_verify", "0" if args.insecure else "1", "-timeout", "5000000",
-        "-rtsp_transport", "tcp", "-i", url, "-map", "0:v:0", "-an",
-        "-t", str(args.duration), "-progress", "pipe:1", "-f", "null", "-",
-    ]
+    command = build_ffmpeg_command(
+        binary,
+        url,
+        args.duration,
+        insecure=args.insecure,
+        protocol_trace=args.protocol_trace,
+    )
     try:
         result = run_probe(command, args.duration, args.stall_timeout)
     except OSError:
