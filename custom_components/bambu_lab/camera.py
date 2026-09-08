@@ -88,6 +88,7 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
 
         self._attr_unique_id = f"{config_entry.data['serial']}_camera"
         self._access_code = config_entry.options.get("access_code", "")
+        self._last_stream_image: bytes | None = None
 
         super().__init__(coordinator=coordinator)
         Camera.__init__(self)
@@ -164,6 +165,23 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
         buf = BytesIO()
         img.save(buf, format="JPEG")
         return buf.getvalue()
+
+    async def async_camera_image(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | None:
+        """Return the latest image without starting a thumbnail-only stream."""
+        stream = self.stream
+        if stream is not None and stream.outputs():
+            image = await stream.async_get_image(width=width, height=height)
+            if image is not None:
+                self._last_stream_image = image
+
+        if self._last_stream_image is not None:
+            return self._last_stream_image
+
+        return await super().async_camera_image(width=width, height=height)
 
 class BambuLabImageCamera(BambuLabEntity, Camera):
     """Camera from chamber image"""

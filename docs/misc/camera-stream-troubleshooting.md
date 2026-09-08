@@ -70,8 +70,11 @@ Keep `use_stream_for_stills=True` unless measurements justify a change: HA can
 reuse its existing provider for snapshots; `True` does not inherently open a
 second RTSP session. For the X2D, isolated FFplay and PyAV playback succeeded
 while repeated HA thumbnail requests failed after the first image. The X2D
-therefore uses a placeholder thumbnail so automatic still requests do not claim
-the LAN camera before live view. Other RTSP models retain stream-based stills.
+therefore does not start the stream for automatic still requests. While an HA
+stream provider is already active, thumbnail requests cache its latest keyframe;
+after the stream closes, the last successful image remains available. A
+placeholder is used only until the first frame is captured or after an HA
+restart. Other RTSP models retain normal stream-based stills.
 Likewise, a working TCP control handshake followed by no video does not justify
 a UDP firewall change: compare default RTSPS and explicit TCP playback first.
 

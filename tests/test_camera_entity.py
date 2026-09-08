@@ -4,7 +4,7 @@ import sys
 import types
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -39,3 +39,52 @@ def test_x2d_does_not_open_stream_for_stills() -> None:
 def test_other_rtsp_cameras_keep_stream_stills() -> None:
     """Existing RTSP camera still-image behavior remains unchanged."""
     assert make_camera(Printers.X1C).use_stream_for_stills is True
+
+
+@pytest.mark.asyncio
+async def test_x2d_caches_image_from_active_stream() -> None:
+    """An active HA stream supplies and caches the X2D thumbnail."""
+    camera = make_camera(Printers.X2D)
+    stream = MagicMock()
+    stream.outputs.return_value = {"hls": object()}
+    stream.async_get_image = AsyncMock(return_value=b"stream image")
+    camera.stream = stream
+
+    assert await camera.async_camera_image(width=640, height=480) == b"stream image"
+    stream.async_get_image.assert_awaited_once_with(width=640, height=480)
+
+    stream.outputs.return_value = {}
+    assert await camera.async_camera_image() == b"stream image"
+    stream.async_get_image.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_x2d_keeps_previous_image_when_active_stream_has_no_frame() -> None:
+    """A missing new keyframe does not replace the previous thumbnail."""
+    camera = make_camera(Printers.X2D)
+    camera._last_stream_image = b"previous image"
+    stream = MagicMock()
+    stream.outputs.return_value = {"hls": object()}
+    stream.async_get_image = AsyncMock(return_value=None)
+    camera.stream = stream
+
+    assert await camera.async_camera_image() == b"previous image"
+
+
+@pytest.mark.asyncio
+async def test_x2d_uses_placeholder_before_streaming() -> None:
+    """The X2D uses its placeholder until a live stream supplies a frame."""
+    camera = make_camera(Printers.X2D)
+    stream = MagicMock()
+    stream.outputs.return_value = {}
+    stream.async_get_image = AsyncMock()
+    camera.stream = stream
+    camera.hass = MagicMock()
+    camera.hass.async_add_executor_job = AsyncMock(
+        side_effect=lambda target: target()
+    )
+    camera.camera_image = MagicMock(return_value=b"placeholder")
+
+    assert await camera.async_camera_image() == b"placeholder"
+    stream.async_get_image.assert_not_awaited()
+    camera.hass.async_add_executor_job.assert_awaited_once()
