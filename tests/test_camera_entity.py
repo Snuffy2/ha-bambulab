@@ -42,6 +42,25 @@ def test_other_rtsp_cameras_keep_stream_stills() -> None:
 
 
 @pytest.mark.asyncio
+async def test_other_rtsp_camera_uses_default_async_still() -> None:
+    """Direct still calls for other RTSP cameras retain HA's default path."""
+    camera = make_camera(Printers.X1C)
+    stream = MagicMock()
+    stream.outputs.return_value = {"hls": object()}
+    stream.async_get_image = AsyncMock(return_value=b"stream image")
+    camera.stream = stream
+    camera.hass = MagicMock()
+    camera.hass.async_add_executor_job = AsyncMock(
+        side_effect=lambda target: target()
+    )
+    camera.camera_image = MagicMock(return_value=b"default image")
+
+    assert await camera.async_camera_image() == b"default image"
+    stream.async_get_image.assert_not_awaited()
+    camera.hass.async_add_executor_job.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_x2d_caches_image_from_active_stream() -> None:
     """An active HA stream supplies and caches the X2D thumbnail."""
     camera = make_camera(Printers.X2D)

@@ -171,7 +171,10 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
         width: int | None = None,
         height: int | None = None,
     ) -> bytes | None:
-        """Return the latest image without starting a thumbnail-only stream."""
+        """Return the latest X2D image without starting a thumbnail-only stream."""
+        if self.coordinator.get_model().info.device_type != Printers.X2D:
+            return await super().async_camera_image(width=width, height=height)
+
         stream = self.stream
         if stream is not None and stream.outputs():
             image = await stream.async_get_image(width=width, height=height)
