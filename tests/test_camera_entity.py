@@ -1,11 +1,20 @@
 """Tests for Bambu Lab camera entity behavior."""
 
+import sys
+import types
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
 pytest.importorskip("homeassistant")
+
+# Import the camera platform without executing the integration package's setup
+# module, which imports unrelated optional integrations such as SSDP.
+package = types.ModuleType("custom_components.bambu_lab")
+package.__path__ = [str(Path(__file__).parents[1] / "custom_components/bambu_lab")]
+sys.modules[package.__name__] = package
 
 from custom_components.bambu_lab.camera import BambuLabRtspCamera
 from custom_components.bambu_lab.pybambu.const import Printers
