@@ -1,20 +1,17 @@
-import os
-
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.core import HomeAssistant
 from io import BytesIO
+
+from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from PIL import Image, ImageDraw
 
 from .const import DOMAIN, LOGGER, Options
-from .models import BambuLabEntity
-from .pybambu.const import Features
-from .pybambu.utils import get_authenticated_rtsp_url
-from .definitions import BambuLabSensorEntityDescription
-
-from homeassistant.components.camera import Camera, CameraEntityFeature
-
 from .coordinator import BambuDataUpdateCoordinator
+from .definitions import BambuLabSensorEntityDescription
+from .models import BambuLabEntity
+from .pybambu.const import Features, Printers
+from .pybambu.utils import get_authenticated_rtsp_url
 
 CHAMBER_CAMERA_SENSOR = BambuLabSensorEntityDescription(
         key="p1p_camera",
@@ -33,7 +30,7 @@ async def async_setup_entry(
 
     coordinator: BambuDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    LOGGER.debug(f"CAMERA::async_setup_entry")
+    LOGGER.debug("CAMERA::async_setup_entry")
 
     # NOTE: We intentionally do NOT gate on has_full_printer_data here.
     #
@@ -91,6 +88,7 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
 
         self._attr_unique_id = f"{config_entry.data['serial']}_camera"
         self._access_code = config_entry.options.get("access_code", "")
+        self._last_stream_image: bytes | None = None
 
         super().__init__(coordinator=coordinator)
         Camera.__init__(self)
@@ -110,7 +108,8 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
 
     @property
     def use_stream_for_stills(self) -> bool:
-        return True
+        """Return whether Home Assistant should open the stream for thumbnails."""
+        return self.coordinator.get_model().info.device_type != Printers.X2D
 
     async def stream_source(self) -> str | None:
         return self._stream_source()
@@ -132,7 +131,7 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
         )
 
     def camera_image(self, width=None, height=None):
-        """Return a still image placeholder if RTSP fails."""
+        """Return a placeholder when direct still retrieval is selected."""
         img_width = width or 320
         img_height = height or 240
 
@@ -166,6 +165,26 @@ class BambuLabRtspCamera(BambuLabEntity, Camera):
         buf = BytesIO()
         img.save(buf, format="JPEG")
         return buf.getvalue()
+
+    async def async_camera_image(
+        self,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> bytes | None:
+        """Return the latest X2D image without starting a thumbnail-only stream."""
+        if self.coordinator.get_model().info.device_type != Printers.X2D:
+            return await super().async_camera_image(width=width, height=height)
+
+        stream = self.stream
+        if stream is not None and stream.outputs():
+            image = await stream.async_get_image(width=width, height=height)
+            if image is not None:
+                self._last_stream_image = image
+
+        if self._last_stream_image is not None:
+            return self._last_stream_image
+
+        return await super().async_camera_image(width=width, height=height)
 
 class BambuLabImageCamera(BambuLabEntity, Camera):
     """Camera from chamber image"""
